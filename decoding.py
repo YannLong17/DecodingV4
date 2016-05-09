@@ -1,12 +1,15 @@
 import data
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.cross_validation import StratifiedKFold, StratifiedShuffleSplit
+from sklearn.cross_validation import StratifiedKFold, StratifiedShuffleSplit, permutation_test_score
 from sklearn.naive_bayes import GaussianNB
 from sklearn.metrics import make_scorer
 from sklearn.decomposition import PCA
+from sklearn.feature_selection import SelectKBest, chi2, f_classif
+from sklearn.pipeline import Pipeline
+from sklearn.grid_search import GridSearchCV
 
-from sklearn.naive_bayes import PoissonNB
+from NaiveBayes import PoissonNB
 
 def getCoordinate(a):
     x = a % 10
@@ -28,6 +31,13 @@ def laxScore (y, y_pred, d):
         else: acc.append(0)
 
     return np.mean(np.asarray(acc))
+
+def error_distance (y, y_pred):
+    dist=[]
+    for i in range(0,len(y)):
+        dist.append(distance(y[i], y_pred[i]))
+
+    return (np.mean(np.asarray(dist)))
 
 def dimReduction():
     file = 'n228_bcdefgh.mat'
@@ -115,8 +125,189 @@ def dimReduction():
     plt.show()
     #    plt.savefig('n228/Fr1AccDimRed.png')
 
+def model_selection():
+    file = 'data/n228_bcdefgh.mat'
+    dat = data.load(file)
+
+    X, y = data.build(dat, range(0, 96), 'fr1', 17)
+
+    filter = SelectKBest(chi2, k=5)
+    clf = PoissonNB()
+
+    poisson = Pipeline([('filter',filter),('pois',clf)])
+
+    #poisson.set_params(filter__k=10).fit(X,y)
+
+    param_grid = [{'filter__score_func': [chi2], 'filter__k': range(1, 96)},
+                  {'filter__score_func': [f_classif], 'filter__k': range(1,96)}]
+    grid = GridSearchCV(poisson, param_grid, n_jobs=-1, scoring=make_scorer(error_distance, greater_is_better=False)).fit(X,y)
+
+    print "Best Params"
+    print grid.best_params_
+    print("Grid scores on development set:")
+    print()
+    for params, mean_score, scores in grid.grid_scores_:
+        print("%0.3f (+/-%0.03f) for %r"
+              % (mean_score, scores.std() * 2, params))
+    print()
+
+def visualize_model_selection():
+    file = 'data/n228_bcdefgh.mat'
+    dat = data.load(file)
+
+    X, y = data.build(dat, range(0, 96), 'fr1', 17)
+
+    # PCA Dimentionnality Reduction
+    pca = PCA(n_components=38)
+    Xb = pca.fit_transform(X)
+
+    # Select good cell with heuristic
+    channel = data.goodCell(dat)
+    Xc, yc = data.build(dat, channel, 'fr1', 17)
+
+    # Univariate Feature Selection
+    select = SelectKBest(chi2,k=15).fit(X,y)
+    Xd = select.transform(X)
+
+    select = SelectKBest(f_classif,k=26).fit(X,y)
+    Xe = select.transform(X)
+
+    # Cross Validation
+    skf = StratifiedKFold(y, n_folds=5, shuffle=True, random_state=42)
+
+    d = range(0, 25)
+    gauss_test_acc = []
+    PCA_gauss_test_acc = []
+    pois_test_acc = []
+    gc_pois_test_acc = []
+    sel_pois_test_acc_ftest = []
+    sel_pois_test_acc_chi= []
+    chance = []
+
+    for i in d:
+        gauss_test_temp = []
+        PCA_gauss_test_temp = []
+        pois_test_temp = []
+        gc_pois_test_temp = []
+        sel_pois_test_temp_ftest = []
+        sel_pois_test_temp_chi= []
+
+        for train_index, test_index in skf:
+            y_train, y_test = y[train_index], y[test_index]
+            X_train, X_test = X[train_index], X[test_index]
+            Xb_train, Xb_test = Xb[train_index], Xb[test_index]
+            Xc_train, Xc_test = Xc[train_index], Xc[test_index]
+            Xd_train, Xd_test = Xd[train_index], Xd[test_index]
+            Xe_train, Xe_test = Xe[train_index], Xe[test_index]
+
+            # Gaussian
+            learner = GaussianNB().fit(X_train, y_train)
+            gauss_test_temp.append(laxScore(y_test, learner.predict(X_test), i))
+
+            # PCA reduced Gaussian
+            learner = GaussianNB().fit(Xb_train, y_train)
+            PCA_gauss_test_temp.append(laxScore(y_test, learner.predict(Xb_test), i))
+
+            # Poisson
+            learner = PoissonNB().fit(X_train, y_train)
+            pois_test_temp.append(laxScore(y_test, learner.predict(X_test), i))
+
+            # GoodCell Poisson
+            learner = PoissonNB().fit(Xc_train, y_train)
+            gc_pois_test_temp.append(laxScore(y_test, learner.predict(Xc_test), i))
+
+            # Univariate reduced Poisson Chi2 test
+            learner = PoissonNB().fit(Xd_train, y_train)
+            sel_pois_test_temp_chi.append(laxScore(y_test, learner.predict(Xd_test), i))
+
+            # Univariate reduced Poisson F test
+            learner = PoissonNB().fit(Xe_train, y_train)
+            sel_pois_test_temp_ftest.append(laxScore(y_test, learner.predict(Xe_test), i))
+        # chance
+        temp = []
+        for k in range(0, 100):
+            tempy = []
+            for j in range(0, 100):
+                if distance(j, k) < i:
+                    tempy.append(1)
+                else:
+                    tempy.append(0)
+            temp.append(np.mean(np.asarray(tempy)))
+
+        chance.append(np.mean(np.asarray(temp)))
+        gauss_test_acc.append(np.mean(np.asarray(gauss_test_temp)))
+        PCA_gauss_test_acc.append(np.mean(np.asarray(PCA_gauss_test_temp)))
+        pois_test_acc.append(np.mean(np.asarray(pois_test_temp)))
+        gc_pois_test_acc.append(np.mean(np.asarray(gc_pois_test_temp)))
+        sel_pois_test_acc_chi.append(np.mean(np.asarray(sel_pois_test_temp_chi)))
+        sel_pois_test_acc_ftest.append(np.mean(np.asarray(sel_pois_test_temp_ftest)))
+
+
+    plt.plot(d, gauss_test_acc)
+    plt.plot(d, PCA_gauss_test_acc)
+    plt.plot(d, pois_test_acc)
+    plt.plot(d, gc_pois_test_acc)
+    plt.plot(d, sel_pois_test_acc_chi)
+    plt.plot(d, sel_pois_test_acc_ftest)
+    plt.plot(d, chance)
+    plt.ylabel('Accuracy')
+    plt.xlabel('Distance')
+    plt.legend(['Gaussian','PCA Reduced Gaussion', 'Poisson', 'Heuristic Reduced Poisson','Univariate Reduced Poisson (Chi2 test, 15 features)','Univariate Reduced Poisson (F test)','Chance'], loc='lower right')
+    plt.show()
+    #    plt.savefig('n228/Fr1AccDimRed.png')
+
+def permutation():
+    file = 'data/n228_bcdefgh.mat'
+    dat = data.load(file)
+    X, y = data.build(dat, range(0, 96), 'fr1', 17)
+
+    # Univariate Feature Selection
+    select = SelectKBest(f_classif,k=27).fit(X,y)
+    Xa = select.transform(X)
+
+    # Select good cell with heuristic
+    channel = data.goodCell(dat)
+    Xb, y = data.build(dat, channel, 'fr1', 17)
+
+    # PCA Dimentionnality Reduction
+    pca = PCA(n_components=38)
+    Xc = pca.fit_transform(X)
+
+
+    dat = [X, Xa, Xb, X, Xc,Xa]
+    pNB = PoissonNB()
+    gNB = GaussianNB()
+    classifiers = [pNB,pNB,pNB,gNB,gNB,gNB]
+    label = ['Poisson Unreduced', 'Poisson Univariate Reduction', 'Poisson Heuristic Reduction', 'Gaussion No reduction', 'Gaussian PCA reduction', 'Gaussian Univariate Reduction']
+    scores = []
+    perm_scores = []
+    p_value = []
+
+    for i in range(0,len(dat)):
+        score, permutation_score, pvalue = permutation_test_score(classifiers[i], dat[i], y, cv=StratifiedKFold(y, n_folds=3, shuffle=True, random_state=42),n_permutations=100, n_jobs=-1, random_state=42, scoring=make_scorer(error_distance, greater_is_better=False))
+        scores.append(score)
+        perm_scores.append(np.mean(permutation_score))
+        p_value.append(pvalue)
+
+    ind = np.arange(len(scores))
+    plt.bar(ind, scores)
+#    ax.set_xticks(ind)
+#    ax.set_xticklabels(label)
+    plt.plot(ind, perm_scores)
+
+
+    plt.show()
+
+
+    print "Average Distance between real location and predicted location"
+    print score
+    print "Chance Performance, from permutation"
+    print np.mean(permutation_score)
+    print "p-value"
+    print pvalue
+
 def localization():
-    file = 'n191_bcde.mat'
+    file = 'data/n191_bcde.mat'
     dat = data.load(file)
 
     # Dimentionnality Reduction
@@ -159,4 +350,5 @@ def arrowPlot(y,y_pred):
     plt.savefig('m191Fr1Localization.png')
 
 if __name__ == '__main__':
-    localization()
+    permutation()
+

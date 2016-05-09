@@ -30,7 +30,6 @@ class PoissonNB(BaseNB):
         n_trials, n_features = X.shape
 
         self.classes_ = unique_y = np.unique(y)
-
         n_classes = unique_y.shape[0]
 
         epsilon = 1e-9
@@ -39,9 +38,9 @@ class PoissonNB(BaseNB):
 
         self.class_prior_ = np.zeros(n_classes)
 
-        for i, y_i in enumerate(n_classes):
+        for i, y_i in enumerate(unique_y):
             Xi = X[y == y_i, :]
-            self.lamda_[i, :] = np.mean(Xi, axis=0) + epsilon
+            self.lambda_[i, :] = np.mean(Xi, axis=0) + epsilon
             self.class_prior_[i] = float(Xi.shape[0])/n_trials
 
         return self
@@ -55,7 +54,7 @@ class PoissonNB(BaseNB):
         for i in range(len(self.classes_)):
             n_ij = np.sum(X*np.log(self.lambda_[i, :]), axis=1)
             n_ij -= np.sum(self.lambda_[i, :])
-            joint_log_likelihood[:, i] = np.log(self.prior_[i]) + n_ij
+            joint_log_likelihood[:, i] = np.log(self.class_prior_[i]) + n_ij
 
         return joint_log_likelihood
 
@@ -63,3 +62,4 @@ class PoissonNB(BaseNB):
     def check_non_negative(X):
         if np.any(X < 0.):
             raise ValueError("Input X must be non-negative")
+

@@ -2,10 +2,10 @@ import numpy as np
 import scipy.io as sio
 from matplotlib import pyplot as plt
 
+
 def load(file):
     dat = sio.loadmat(file,squeeze_me=False)
     return dat
-
 
 def getSacc(dat):
     X1 = dat['makeStim']['fixX'][0, 0][0][0]
@@ -75,14 +75,21 @@ def build(dat,channel,condition,time):
     return X,Y
 
 def visualize():
-    file='n228_bcdefgh.mat'
+    file='data/n228_bcdefgh.mat'
     dat=load(file)
-    good = goodCell(dat)
     fr1 = dat['fr1'][:100,0]
     fr3 = dat['fr3'][:100,0]
     array1 = np.zeros(100)
     array2 = np.zeros(100)
     time = 17
+
+    from sklearn.feature_selection import SelectKBest, chi2
+    # Univariate selection based on Fr1
+    X, y = build(dat,range(0,96),'fr1',time)
+    selected = SelectKBest(chi2,k=38).fit(X,y).get_support(indices = True)
+
+    # Heuristic Selection based center of mass Shift
+    good = goodCell(dat)
 
     for i in range(0,96):
         for j in range(0,100):
@@ -95,12 +102,16 @@ def visualize():
         plt.subplot(2, 1, 2)
         plt.imshow(np.reshape(array2,[10,10]).T)
 
-        if i in good:
-            plt.title("Good")
+        if i in good and i in selected :
+            plt.title("Good in Both")
+        elif i in good and i not in selected:
+            plt.title("Heuristic Only")
+        elif i in selected and i not in good:
+            plt.title("Univariate Selection Only")
         else:
             plt.title("Bad")
 
-        plt.savefig('n228/channel{0}.png'.format(i+1))
+        plt.savefig('Figures/n228channel{0}.png'.format(i+1))
 
 if __name__ == '__main__':
     visualize()
